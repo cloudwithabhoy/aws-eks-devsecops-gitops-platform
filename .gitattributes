@@ -1,0 +1,22 @@
+# Normalise every text file to LF in the repo and the working tree.
+# Matters on Windows/WSL: CRLF breaks shell scripts, Makefiles and some YAML tooling.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files: never touch line endings or try to diff them
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.jar  binary
+
+# draw.io SVGs embed the diagram model on one huge line; diff them as text but don't merge them
+*.drawio.svg text eol=lf merge=binary
