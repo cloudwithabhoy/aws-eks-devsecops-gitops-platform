@@ -1,0 +1,34 @@
+# Local guardrails: catch secrets and formatting problems before they leave the laptop.
+# The same hooks run in CI (P1-05), so skipping them locally doesn't get a change merged.
+# Revs are frozen to commit SHAs (tags can be moved); update with `pre-commit autoupdate --freeze`.
+default_install_hook_types: [pre-commit]
+fail_fast: false
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        # Helm templates and multi-document manifests aren't plain YAML
+        args: [--allow-multiple-documents]
+        exclude: ^charts/.*/templates/
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch, main]
+        # Direct commits to main are allowed until branch protection lands in P1-07
+        stages: [manual]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e  # frozen: v8.30.1
+    hooks:
+      - id: gitleaks
