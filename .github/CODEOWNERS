@@ -1,0 +1,13 @@
+# Solo project: one owner everywhere. The path groups mirror how separate teams
+# would own these areas in a larger org (ADR-0001). Code-owner review is not
+# required by the ruleset (P1-07) since GitHub won't let you approve your own PR.
+# Later rules override earlier ones.
+
+*                     @cloudwithabhoy
+
+/services/            @cloudwithabhoy
+/infra/               @cloudwithabhoy
+/charts/              @cloudwithabhoy
+/gitops/              @cloudwithabhoy
+/.github/             @cloudwithabhoy
+/docs/adr/            @cloudwithabhoy
