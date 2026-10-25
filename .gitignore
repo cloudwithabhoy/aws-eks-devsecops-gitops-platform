@@ -1,0 +1,24 @@
+# IDE
+.idea/
+.vscode/
+
+# Secrets and local config: never commit
+.env
+.env.*
+*.pem
+kubeconfig*
+*.kubeconfig
+
+# Terraform / Terragrunt
+*.tfstate
+*.tfstate.*
+.terraform/
+.terragrunt-cache/
+crash.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code project brief (kept local)
+CLAUDE.md
