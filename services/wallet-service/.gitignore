@@ -1,0 +1,5 @@
+# Maven build output
+target/
+
+# The wrapper downloads Maven itself (distributionType=only-script); never commit a jar
+.mvn/wrapper/maven-wrapper.jar

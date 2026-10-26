@@ -77,7 +77,7 @@ flowchart LR
 ### P1-03: wallet-service skeleton
 - **Why:** give the pipeline something real to build, test and scan, with no business logic yet.
 - **Scope:**
-  - Spring Boot project in `services/wallet-service` with the Maven Wrapper; Java and Spring Boot versions verified and pinned (latest LTS Java that has a distroless image, with the current Spring Boot major)
+  - Spring Boot project in `services/wallet-service` with the Maven Wrapper; Java and Spring Boot versions verified and pinned (Java 21 LTS, the mainstream LTS with a distroless image, chosen over 25 since nothing needs 25 yet; current Spring Boot major)
   - `/healthz` (liveness) and `/readyz` (readiness) via Actuator health groups; config from environment variables only; graceful shutdown on SIGTERM
   - One unit test, one web-layer test
   - `make test` and `make run` targets for the service
