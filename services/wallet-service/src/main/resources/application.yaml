@@ -1,0 +1,36 @@
+# All runtime config comes from environment variables, with safe local defaults.
+# Spring's relaxed binding also maps env vars directly (e.g. SERVER_PORT -> server.port).
+# No per-environment profile files: dev/staging/prod differ only in injected env.
+
+spring:
+  application:
+    name: wallet-service
+  lifecycle:
+    # Must stay below the pod's terminationGracePeriodSeconds (30s by default),
+    # or Kubernetes SIGKILLs the JVM mid-request.
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}
+
+server:
+  port: ${PORT:8080}
+  # On SIGTERM: stop accepting new requests, finish in-flight ones, then exit
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only health over HTTP. env, beans, heapdump etc. leak internals.
+        include: health
+  endpoint:
+    health:
+      probes:
+        # On by default only when Spring detects Kubernetes; explicit so it also works locally and in tests
+        enabled: true
+      group:
+        # Liveness = "restart me if this fails": process state only, never dependencies,
+        # or a DB outage turns into a restart storm.
+        liveness:
+          additional-path: "server:/healthz"
+        # Readiness = "stop sending me traffic": dependencies (DB) join this group in P1-15.
+        readiness:
+          additional-path: "server:/readyz"
