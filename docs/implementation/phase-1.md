@@ -138,3 +138,63 @@ Plan: [phase-1.md](../plan/phase-1.md)
 - **Q: How does a Spring Boot app shut down cleanly in Kubernetes?** SIGTERM → stop accepting requests, finish in-flight ones within `timeout-per-shutdown-phase`, exit, all before the grace period ends.
 - **Q: Why Java 21 rather than the newest LTS?** It's mainstream and supported, nothing needed 25, and upgrading later is trivial. Choose by need, not novelty.
 - **Q: Builds fail on your laptop but nowhere else, with a host you've never heard of. Where do you look?** `~/.m2/settings.xml` mirrors, proxy settings, and environment variables like `MAVEN_OPTS`.
+
+---
+
+## P1-04: Hardened multi-arch Dockerfile
+
+**Date:** 2026-10-27 · **Commits:** `5d8f8fe` `8c99642` `52a3aa6`
+
+### What I built
+- `services/wallet-service/Dockerfile`: two stages. A Temurin 21 JDK build stage and a **distroless `java21-debian13:nonroot`** runtime
+- `.dockerignore` as an **allow-list** (`.mvn/`, `mvnw`, `pom.xml`, `src/` only)
+- Service `Makefile` targets: `image`, `image-multiarch`, `run-image`, `lint-docker` (Hadolint), `scan` (Trivy)
+
+### How
+- `docker buildx build --load -t wallet-service:<sha> .` for the local image; `--platform linux/amd64,linux/arm64` for both architectures.
+- Hadolint and Trivy run as pinned containers, so nothing extra is installed on the laptop and CI can run the same commands.
+- Docker Desktop's containerd image store handles multi-arch builds without a separate builder.
+
+### Why these choices
+- **Build stage on `$BUILDPLATFORM`:** Java bytecode is the same on every CPU, so the jar is built once at native speed and copied into both the amd64 and arm64 runtimes. Building "for arm64" would run Maven under QEMU emulation, many times slower, for an identical jar. (Go or native code would need cross-compilation instead.)
+- **Distroless runtime:** only the JRE and CA certificates. No shell, no package manager, so a much smaller attack surface and CVE count, and nothing to `exec` into. Debugging uses `kubectl debug` with an ephemeral container instead.
+- **Numeric `USER 65532:65532`:** Kubernetes' `runAsNonRoot` can only verify a numeric UID; a user *name* fails admission.
+- **Works with a read-only root filesystem:** the only writable path is `/tmp` (Tomcat's work directory), mounted as tmpfs locally and `emptyDir` in Kubernetes.
+- **Exec-form `ENTRYPOINT`:** java is PID 1 and receives SIGTERM directly. Shell form would wrap it in `/bin/sh -c`, which doesn't forward signals (and distroless has no shell anyway).
+- **Spring Boot layered jar:** dependencies, loader, snapshots and application code go in separate layers, ordered by how often they change, so a code change only rebuilds and pushes the small application layer.
+- **Dependencies before source:** `mvnw` + `pom.xml` are copied and resolved before `src/`, so the dependency layer is cached across code changes; a BuildKit cache mount keeps `~/.m2` between builds.
+- **No tests in the image build:** CI runs them in its own stage before building; running them twice slows every build.
+- **`-XX:MaxRAMPercentage=75`:** sizes the heap from the container's memory limit. `ExitOnOutOfMemoryError` lets Kubernetes restart a broken JVM instead of leaving it half-alive.
+- **Every image pinned by digest** (base images and scanner images): a tag can be moved; a digest is the exact image. Renovate updates digests via PRs from Phase 2.
+- **No `HEALTHCHECK`:** Kubernetes ignores it and uses its own probes (`/healthz`, `/readyz`); distroless also has no curl to run one.
+
+### Problems I hit and how I fixed them
+- **The first Trivy scan failed the gate**, which is the gate working:
+  - **3 CRITICAL CVEs in Tomcat 11.0.24 and 5 HIGH in Jackson 3.1.5**, both from Spring Boot 4.1.1. Spring Boot 4.1.2 ships Tomcat 11.0.27 and Jackson 3.1.7, so I upgraded, even though 4.1.2 was only 5 days old. The two-week rule exists to avoid fresh regressions; a **security patch release is the exception**.
+  - **17 OS CVEs (1 CRITICAL) in `distroless/java21-debian12`**, whose packages lag. Before switching, I scanned `java21-debian13` on its own: only 4 HIGH, all in `libuuid1` with **no fix released**. Switched to debian13.
+  - `make scan` uses `--ignore-unfixed`: a CVE with no fix can't be acted on. These 4 clear automatically when a fixed base-image digest lands.
+- **Trivy timed out on its first run** (`context deadline exceeded`): it downloads its vulnerability DB plus a several-hundred-MB Java DB, then opens every jar. Fixed with `--timeout 20m` and a `trivy-cache` volume; later scans take about a minute. CI will cache the DB too.
+- **`docker` not found in WSL:** Docker Desktop's WSL integration was off. Fix: *Settings → Resources → WSL integration → Ubuntu*. Until then, the Windows CLI works (`cmd.exe /c "docker …"`).
+- **Exit code 143 after `docker stop` looked like a failure.** It isn't: 143 = 128 + 15 (SIGTERM). The JVM reports termination by signal even after a clean graceful shutdown.
+
+### How I verified it
+- Hadolint: no findings.
+- `docker image ls --tree`: both `linux/amd64` and `linux/arm64`, about 83 MB compressed each. The build log shows the build stage ran **once**, on amd64.
+- `docker run --read-only --tmpfs /tmp --cap-drop=ALL --security-opt no-new-privileges`: starts as `nonroot` with java as PID 1; `/healthz` and `/readyz` return UP; `/actuator/env` returns 404; `docker exec … sh` fails (no shell).
+- `docker stop` → "Commencing graceful shutdown" → "Graceful shutdown complete" in 1.2 s, well inside Docker's 10 s grace. **This also closes P1-03's open SIGTERM criterion.**
+- Trivy (`--severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`): 0 findings, exit 0.
+- `mvnw verify` re-run after the Spring Boot upgrade: tests pass.
+
+### Concepts I learned
+- `$BUILDPLATFORM` vs `$TARGETPLATFORM` in multi-platform builds.
+- Image index (manifest list) vs per-platform manifests; digests of each.
+- Exec vs shell form, PID 1 and signal handling; exit code 128 + N.
+- Why distroless and numeric UIDs matter for Kubernetes security contexts.
+- Fixable vs unfixed CVEs, and why scanners have `--ignore-unfixed`.
+
+### Questions this answers
+- **Q: How do you build an arm64 image on an x86 laptop or runner?** `buildx` with `--platform`. For JVM apps, run the build stage on `$BUILDPLATFORM` so only the runtime stage is per-architecture, with no emulation.
+- **Q: Your image scan fails on a CVE in a dependency. What do you do?** Find which library and which upstream version fixes it; upgrade the parent (here Spring Boot) rather than overriding one library; rebuild and re-run *all* checks. If there's no fix, document it with a reason and an expiry, never silently ignore.
+- **Q: Why distroless instead of Alpine?** No shell or package manager at all, and glibc (Alpine's musl can behave differently for the JVM). Fewer packages means fewer CVEs.
+- **Q: Your container ignores SIGTERM and gets killed after 30 s. Why?** Usually shell-form `ENTRYPOINT` (`sh -c` doesn't forward signals) or the app not handling SIGTERM.
+- **Q: Why pin images by digest if you also use tags?** The tag is for humans; the digest guarantees the exact bytes, so builds are reproducible and a re-pushed tag can't slip in.

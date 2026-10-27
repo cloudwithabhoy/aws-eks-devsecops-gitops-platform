@@ -53,8 +53,8 @@ flowchart LR
   - Commit the existing docs; connect the GitHub remote; push `main`
 - **Out of scope:** CI workflows, branch protection
 - **Acceptance criteria:**
-  - [ ] Repo is public on GitHub; README, diagrams and Mermaid render correctly
-  - [ ] `git ls-files --eol` shows LF for all text files
+  - [x] Repo is public on GitHub; README, diagrams and Mermaid render correctly
+  - [x] `git ls-files --eol` shows LF for all text files
 - **Depends on:** —
 - **Runs on:** local + GitHub
 - **Output:** repo root, `.github/`
@@ -66,8 +66,8 @@ flowchart LR
   - Root `Makefile` with `help`, `lint` (runs pre-commit on all files) and `bootstrap-dev` (installs the hooks)
 - **Out of scope:** language-specific linters (they come with each service)
 - **Acceptance criteria:**
-  - [ ] `make lint` passes on a clean tree
-  - [ ] Committing a fake AWS key is blocked locally
+  - [x] `make lint` passes on a clean tree
+  - [x] Committing a fake AWS key is blocked locally
 - **Depends on:** P1-01
 - **Runs on:** local
 - **Output:** `.pre-commit-config.yaml`, `Makefile`
@@ -83,8 +83,8 @@ flowchart LR
   - `make test` and `make run` targets for the service
 - **Out of scope:** database, metrics, auth, ledger logic
 - **Acceptance criteria:**
-  - [ ] `./mvnw verify` passes; JaCoCo report generated
-  - [ ] `curl localhost:8080/healthz` returns `UP`; SIGTERM shuts down cleanly within the grace period
+  - [x] `./mvnw verify` passes; JaCoCo report generated
+  - [x] `curl localhost:8080/healthz` returns `UP`; SIGTERM shuts down cleanly within the grace period
 - **Depends on:** P1-02
 - **Runs on:** local
 - **Output:** `services/wallet-service/`
@@ -98,9 +98,9 @@ flowchart LR
   - `docker buildx build --platform linux/amd64,linux/arm64` works locally
 - **Out of scope:** pushing anywhere
 - **Acceptance criteria:**
-  - [ ] Hadolint reports no issues
-  - [ ] Container runs as a non-root UID with `--read-only --cap-drop=ALL`, and `/healthz` is UP
-  - [ ] `trivy image` shows no CRITICAL/HIGH vulnerabilities (or each one is documented in `.trivyignore` with a reason)
+  - [x] Hadolint reports no issues
+  - [x] Container runs as a non-root UID with `--read-only --cap-drop=ALL`, and `/healthz` is UP
+  - [x] `trivy image` shows no CRITICAL/HIGH vulnerabilities (or each one is documented in `.trivyignore` with a reason)
 - **Depends on:** P1-03
 - **Runs on:** local
 - **Output:** `services/wallet-service/Dockerfile`, `.dockerignore`
