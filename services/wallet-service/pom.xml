@@ -6,8 +6,9 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <!-- 4.1.2 was released 2026-10-22; held back until it's two weeks old (pinning rule). Renovate bumps it from Phase 2. -->
-    <version>4.1.1</version>
+    <!-- 4.1.2 is newer than the two-week rule allows, but it's a security patch release:
+         Trivy flagged 3 CRITICAL Tomcat and 5 HIGH Jackson CVEs in 4.1.1. Security fixes override the rule. -->
+    <version>4.1.2</version>
     <relativePath/>
   </parent>
 
@@ -18,7 +19,7 @@
   <description>LedgerPay balances and double-entry ledger</description>
 
   <properties>
-    <!-- Java 21 LTS: the most widely deployed LTS, virtual threads, distroless runtime (java21-debian12).
+    <!-- Java 21 LTS: the most widely deployed LTS, virtual threads, distroless runtime (java21-debian13).
          Nothing here needs 25 yet; moving up is a one-line change. -->
     <java.version>21</java.version>
     <jacoco.version>0.8.14</jacoco.version>
