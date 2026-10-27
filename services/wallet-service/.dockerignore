@@ -1,0 +1,7 @@
+# Allow-list: only what the build needs enters the build context.
+# Safer than a deny-list: a stray .env or key file can never be sent to the builder.
+*
+!.mvn/
+!mvnw
+!pom.xml
+!src/
