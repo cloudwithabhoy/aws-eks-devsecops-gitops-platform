@@ -231,6 +231,7 @@ Plan: [phase-1.md](../plan/phase-1.md)
 
 ### Problems I hit and how I fixed them
 - **The Gitleaks pre-commit hook would have passed vacuously in CI**, because it only looks at staged files. Caught while reading the hook's definition (`.pre-commit-hooks.yaml` in the Gitleaks repo); fixed with `SKIP` plus the separate history scan.
+- **The first CI runs failed although every hook passed on my laptop.** `.gitattributes` checks `*.cmd` files out with CRLF (correct for Windows batch files), but the `mixed-line-ending --fix=lf` hook then "fixed" `mvnw.cmd` to LF and failed. My local copy predated the CRLF rule, so it only showed up on a **fresh clone**, which is exactly what CI uses. Reproduced by cloning the repo into a temp folder and running the hooks there; fixed by excluding `\.(bat|cmd|ps1)$` from that hook. Lesson: when CI and local disagree, reproduce on a clean checkout, not in the working copy.
 
 ### How I verified it
 - [ ] Pushed to `main`: both jobs green *(to be confirmed after the first run)*
