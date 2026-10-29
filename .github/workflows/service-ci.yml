@@ -1,0 +1,272 @@
+# Golden pipeline: the one CI every service calls, so no service can skip a gate.
+# Callers are thin, path-filtered workflows (e.g. wallet-service.yml).
+#
+#   test ─────────┐
+#                 ├─► image: multi-arch build ─► Trivy image ─► Syft SBOM
+#   source-scan ──┘   (Semgrep, Trivy fs, Hadolint)
+#
+# test and source-scan run in parallel; the image is only built if both pass.
+# Out of scope until later tasks: push + Cosign signing (P1-10), GitOps PR (Phase 3).
+name: service-ci
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: Directory name under services/
+        required: true
+        type: string
+      language:
+        description: Toolchain for lint and tests (java; go/python/node arrive in P4-01)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  SERVICE_DIR: services/${{ inputs.service }}
+  IMAGE: ${{ inputs.service }}:${{ github.sha }}
+  # Scanner images, pinned by digest like everything else
+  TRIVY_IMAGE: aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+  SEMGREP_IMAGE: semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3
+  HADOLINT_IMAGE: hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
+  SYFT_IMAGE: anchore/syft:v1.54.1@sha256:3eb5379ba7b409c3f4069b686110527af0c47df993fa5c10d13e7cf34f49b1aa
+
+jobs:
+  # ---- Stage 1: lint + unit tests + coverage gate --------------------------------
+  test:
+    name: test (${{ inputs.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ${{ env.SERVICE_DIR }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check language
+        run: |
+          if [ "${{ inputs.language }}" != "java" ]; then
+            echo "::error::language '${{ inputs.language }}' is not supported yet (go/python/node arrive in P4-01)"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: ${{ env.SERVICE_DIR }}/pom.xml
+
+      # Compiles, runs every test and enforces the JaCoCo gate (configured in pom.xml)
+      - name: Build, test, coverage gate
+        run: ./mvnw -B --no-transfer-progress verify
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Tests and coverage (${{ inputs.service }})"
+            csv=target/site/jacoco/jacoco.csv
+            if [ -f "$csv" ]; then
+              awk -F, 'NR > 1 { missed += $8; covered += $9 }
+                END { total = missed + covered
+                      if (total == 0) print "Line coverage: no measured lines yet (gate: 70%)"
+                      else printf "Line coverage: **%.1f%%** (%d/%d lines, gate: 70%%)\n", 100 * covered / total, covered, total }' "$csv"
+            else
+              echo "No coverage report (build failed before tests finished)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.service }}-test-reports
+          path: |
+            ${{ env.SERVICE_DIR }}/target/surefire-reports/
+            ${{ env.SERVICE_DIR }}/target/site/jacoco/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---- Stages 2-4: source scans (SAST, dependencies, Dockerfile) -----------------
+  source-scan:
+    name: source scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Trivy reads pom.xml dependencies from the local Maven repository. Without it, Trivy
+      # downloads every POM from Maven Central itself and gets rate-limited (HTTP 429).
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: ${{ env.SERVICE_DIR }}/pom.xml
+
+      - name: Resolve dependencies for Trivy
+        working-directory: ${{ env.SERVICE_DIR }}
+        run: ./mvnw -B --no-transfer-progress -q dependency:resolve
+
+      # Every scan runs even if an earlier one failed, so one run shows all problems
+      - name: Semgrep CE (SAST)
+        id: semgrep
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" \
+            semgrep scan --config p/default --config p/java \
+              --metrics=off --error --severity ERROR --severity WARNING \
+              --json-output=semgrep.json "$SERVICE_DIR"
+
+      - name: Today's date (Trivy DB cache key)
+        id: date
+        run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      # One cache per day: fresh vulnerability data without a ~1 GB download on every run
+      - name: Restore Trivy DB cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ steps.date.outputs.today }}
+          restore-keys: trivy-db-${{ runner.os }}-
+
+      # Dependencies (pom.xml) and misconfigurations (Dockerfile) in the source tree
+      - name: Trivy fs (dependencies + Dockerfile config)
+        id: trivy_fs
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+            -v "$HOME/.m2/repository:/root/.m2/repository:ro" "$TRIVY_IMAGE" \
+            fs --skip-version-check --scanners vuln,misconfig --severity CRITICAL,HIGH --ignore-unfixed \
+              --ignorefile "$SERVICE_DIR/.trivyignore" --timeout 20m \
+              --exit-code 1 --format table --output trivy-fs.txt "$SERVICE_DIR"
+
+      - name: Hadolint (Dockerfile lint)
+        id: hadolint
+        continue-on-error: true
+        run: docker run --rm -i "$HADOLINT_IMAGE" < "$SERVICE_DIR/Dockerfile" | tee hadolint.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Source scans (${{ inputs.service }})"
+            echo "| Scan | Result |"
+            echo "|---|---|"
+            echo "| Semgrep CE | ${{ steps.semgrep.outcome }} ($( [ -f semgrep.json ] && jq '.results | length' semgrep.json || echo '?') findings) |"
+            echo "| Trivy fs | ${{ steps.trivy_fs.outcome }} |"
+            echo "| Hadolint | ${{ steps.hadolint.outcome }} |"
+            if [ -s trivy-fs.txt ]; then
+              echo; echo "<details><summary>Trivy fs report</summary>"; echo; echo '```'; cat trivy-fs.txt; echo '```'; echo "</details>"
+            fi
+            if [ -s hadolint.txt ]; then
+              echo; echo "**Hadolint:**"; echo '```'; cat hadolint.txt; echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any scan failed
+        if: steps.semgrep.outcome == 'failure' || steps.trivy_fs.outcome == 'failure' || steps.hadolint.outcome == 'failure'
+        run: |
+          echo "::error::semgrep=${{ steps.semgrep.outcome }} trivy-fs=${{ steps.trivy_fs.outcome }} hadolint=${{ steps.hadolint.outcome }}"
+          exit 1
+
+  # ---- Stages 5-7: build, image scan, SBOM ---------------------------------------
+  image:
+    name: image
+    needs: [test, source-scan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # docker-container builder: needed for multi-platform builds and the GitHub Actions cache.
+      # No QEMU: the Dockerfile's build stage runs on $BUILDPLATFORM, and the per-arch runtime
+      # stage has only COPY instructions, so nothing executes under emulation.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Proves both architectures build; layers go to the GHA cache (scoped per service)
+      - name: Build linux/amd64 + linux/arm64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ env.SERVICE_DIR }}
+          platforms: linux/amd64,linux/arm64
+          push: false
+          provenance: false
+          cache-from: type=gha,scope=${{ inputs.service }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.service }}
+
+      # Same build from cache, loaded into the local Docker so the scanners can read it
+      - name: Load linux/amd64 image for scanning
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ env.SERVICE_DIR }}
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}
+          provenance: false
+          cache-from: type=gha,scope=${{ inputs.service }}
+
+      - name: Today's date (Trivy DB cache key)
+        id: date
+        run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Trivy DB cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ steps.date.outputs.today }}
+          restore-keys: trivy-db-${{ runner.os }}-
+
+      - name: Trivy image (fail on fixable CRITICAL/HIGH)
+        id: trivy_image
+        continue-on-error: true
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/trivy" -v "$PWD:/src" -w /src "$TRIVY_IMAGE" \
+            image --skip-version-check --severity CRITICAL,HIGH --ignore-unfixed \
+              --ignorefile "$SERVICE_DIR/.trivyignore" --timeout 20m \
+              --exit-code 1 --format table --output trivy-image.txt "$IMAGE"
+
+      - name: Syft SBOM (SPDX JSON)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$SYFT_IMAGE" \
+            "docker:$IMAGE" -o spdx-json > sbom.spdx.json
+          echo "SBOM packages: $(jq '.packages | length' sbom.spdx.json)"
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.service }}-sbom
+          path: sbom.spdx.json
+          retention-days: 30
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Image (${{ inputs.service }})"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Image | \`$IMAGE\` (linux/amd64 + linux/arm64 built; amd64 scanned) |"
+            echo "| Size (amd64, uncompressed) | $(docker image inspect "$IMAGE" --format '{{.Size}}' 2>/dev/null | numfmt --to=iec || echo '?') |"
+            echo "| Trivy image | ${{ steps.trivy_image.outcome }} |"
+            echo "| SBOM packages | $( [ -f sbom.spdx.json ] && jq '.packages | length' sbom.spdx.json || echo '?') |"
+            if [ -s trivy-image.txt ]; then
+              echo; echo "<details><summary>Trivy image report</summary>"; echo; echo '```'; cat trivy-image.txt; echo '```'; echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if the image scan failed
+        if: steps.trivy_image.outcome == 'failure'
+        run: |
+          echo "::error::Trivy found fixable CRITICAL/HIGH vulnerabilities in $IMAGE (see the job summary)"
+          exit 1

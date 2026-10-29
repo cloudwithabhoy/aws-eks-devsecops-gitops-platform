@@ -1,0 +1,7 @@
+# Accepted Trivy findings for wallet-service. Every entry needs a reason and a review date:
+#
+#   # <why it's not exploitable here or why it can't be fixed yet>; review by YYYY-MM-DD
+#   CVE-XXXX-NNNNN
+#
+# Unfixed CVEs (no patched version released) are already skipped with --ignore-unfixed.
+# None accepted today.
