@@ -198,3 +198,53 @@ Plan: [phase-1.md](../plan/phase-1.md)
 - **Q: Why distroless instead of Alpine?** No shell or package manager at all, and glibc (Alpine's musl can behave differently for the JVM). Fewer packages means fewer CVEs.
 - **Q: Your container ignores SIGTERM and gets killed after 30 s. Why?** Usually shell-form `ENTRYPOINT` (`sh -c` doesn't forward signals) or the app not handling SIGTERM.
 - **Q: Why pin images by digest if you also use tags?** The tag is for humans; the digest guarantees the exact bytes, so builds are reproducible and a re-pushed tag can't slip in.
+
+---
+
+## P1-05: Repo-wide checks workflow
+
+**Date:** 2026-10-27 · **Commit:** see `git log --grep "Refs: P1-05"`
+
+### What I built
+`.github/workflows/repo-checks.yml`, the first CI workflow. It runs on every push to `main`, every pull request, and on demand, with two parallel jobs:
+- **pre-commit (all files):** the same hooks as on the laptop, on every file in the repo
+- **gitleaks (full history):** every commit on every branch scanned for secrets, with a job summary table
+
+### How
+- `pre-commit` job: checkout → Python 3.12 → restore `~/.cache/pre-commit` → `pip install pre-commit==4.6.2` → `pre-commit run --all-files --show-diff-on-failure`.
+- `gitleaks` job: checkout with `fetch-depth: 0` → download the Gitleaks 8.30.1 release binary, **verify its SHA-256** → `gitleaks git --log-opts="--all" --redact` → JSON report → Markdown summary.
+- Checked before pushing: actionlint (with shellcheck on the `run:` scripts) clean, all pre-commit hooks pass, and a local full-history Gitleaks scan finds nothing (18 commits).
+
+### Why these choices
+- **Why CI repeats the local hooks:** `git commit --no-verify` skips local hooks, and a fresh clone has none installed. Local hooks give fast feedback; CI is the enforcement.
+- **`permissions: contents: read` at workflow level:** the `GITHUB_TOKEN` gets read-only access. If a step or action were compromised, it couldn't push code, change releases or open PRs.
+- **Actions pinned by commit SHA** (`@3d3c42e… # v7.0.1`): a tag can be force-moved to new code (as in the 2025 `tj-actions/changed-files` compromise); a SHA can't. The comment keeps the version readable, and Renovate updates both.
+- **Versions at least two weeks old:** `actions/setup-python` v7.0.0 rather than v7.1.0 (5 days old).
+- **`persist-credentials: false`:** checkout otherwise leaves the token in `.git/config` for every later step to read. Neither job pushes, so neither needs it.
+- **`concurrency` with `cancel-in-progress` only for PRs:** a new push to a PR cancels the now-pointless run on the old commit (saves minutes). Runs on `main` are never cancelled, so every commit on `main` has a recorded result.
+- **Gitleaks as a verified binary, not `gitleaks-action`:** one less third-party action with access to the job; the checksum proves it's the official release; and it's the same version as the local hook.
+- **Full history, all refs:** deleting a secret in a later commit doesn't remove it from Git. Anyone who clones can check out the old commit, so history must be clean too.
+- **Gitleaks hook skipped inside the pre-commit job (`SKIP: gitleaks`):** the hook scans *staged* changes, which is always empty in CI, so it would pass while checking nothing. The dedicated job covers it properly.
+- **`--redact`:** CI logs and summaries never print the secret itself; a leaked log would otherwise leak it again.
+- **Pinned runner image (`ubuntu-24.04`, not `ubuntu-latest`)** and **`timeout-minutes`** on every job: no surprise OS upgrades, and a hung job can't burn the free minutes for 6 hours.
+- **Cache key = hash of `.pre-commit-config.yaml`:** hook environments (including the compiled Gitleaks) are rebuilt only when the hooks change.
+
+### Problems I hit and how I fixed them
+- **The Gitleaks pre-commit hook would have passed vacuously in CI**, because it only looks at staged files. Caught while reading the hook's definition (`.pre-commit-hooks.yaml` in the Gitleaks repo); fixed with `SKIP` plus the separate history scan.
+
+### How I verified it
+- [ ] Pushed to `main`: both jobs green *(to be confirmed after the first run)*
+- [ ] Planted-secret PR: a branch with a fake AWS key committed with `--no-verify`; the `gitleaks` job fails and its summary names the rule and file; PR closed and branch deleted *(to be confirmed)*
+
+### Concepts I learned
+- `GITHUB_TOKEN` and the `permissions:` block; workflow-level vs job-level permissions.
+- Why pinning by SHA matters for third-party actions.
+- `concurrency` groups and `cancel-in-progress`.
+- Shallow vs full clones (`fetch-depth`), and why secret scanning needs the full history.
+- `$GITHUB_STEP_SUMMARY` for readable results on the run page.
+
+### Questions this answers
+- **Q: How do you stop a compromised GitHub Action from stealing secrets or pushing code?** Pin by SHA, minimise third-party actions, give the token read-only permissions, `persist-credentials: false`, and expose secrets only to the steps that need them.
+- **Q: A developer committed a secret, then deleted it in the next commit. Is it safe?** No. It's still in history; a full-history scan finds it. Rotate the secret first, then rewrite history if needed.
+- **Q: Why have both local hooks and CI checks?** Local is fast feedback and can be bypassed; CI is the gate that can't be (once branch protection requires it, P1-07).
+- **Q: Your CI is slow and runs on outdated commits. What do you do?** Cache dependencies (here, hook environments) and use `concurrency` to cancel superseded PR runs.
