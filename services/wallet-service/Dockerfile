@@ -16,7 +16,7 @@ COPY .mvn/ .mvn/
 RUN --mount=type=cache,target=/root/.m2 \
     ./mvnw -B -q dependency:go-offline
 
-COPY src/ src/
+ADD src/ src/
 # Tests run in CI's test stage, not inside the image build
 RUN --mount=type=cache,target=/root/.m2 \
     ./mvnw -B -q -DskipTests package \

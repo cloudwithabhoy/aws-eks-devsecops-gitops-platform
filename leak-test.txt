@@ -1,0 +1,1 @@
+aws_access_key_id = AKIAZ7TQ4XN2KD5RWM3P
