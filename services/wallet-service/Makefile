@@ -48,7 +48,7 @@ lint-docker: ## Lint the Dockerfile with Hadolint
 # and picked up automatically once a fixed base image digest lands (Renovate).
 scan: ## Scan the image for CRITICAL/HIGH CVEs with Trivy (fails if any are found; first run downloads the DBs)
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache \
-	  $(TRIVY) image --timeout 20m --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 $(IMAGE):$(TAG)
+	  $(TRIVY) image --skip-version-check --timeout 20m --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 $(IMAGE):$(TAG)
 
 .PHONY: clean
 clean: ## Delete build output

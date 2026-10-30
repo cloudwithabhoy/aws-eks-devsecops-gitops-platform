@@ -249,3 +249,62 @@ Plan: [phase-1.md](../plan/phase-1.md)
 - **Q: A developer committed a secret, then deleted it in the next commit. Is it safe?** No. It's still in history; a full-history scan finds it. Rotate the secret first, then rewrite history if needed.
 - **Q: Why have both local hooks and CI checks?** Local is fast feedback and can be bypassed; CI is the gate that can't be (once branch protection requires it, P1-07).
 - **Q: Your CI is slow and runs on outdated commits. What do you do?** Cache dependencies (here, hook environments) and use `concurrency` to cancel superseded PR runs.
+
+---
+
+## P1-06: Reusable service CI workflow (golden pipeline v1)
+
+**Date:** 2026-10-29 · **Commit:** see `git log --grep "Refs: P1-06"`
+
+### What I built
+- `.github/workflows/service-ci.yml`: a **reusable** workflow (`workflow_call`) with inputs `service` and `language`, three jobs:
+  - **test** (stage 1): `./mvnw verify` = compile + tests + **JaCoCo gate (≥ 70 % lines)**; coverage % in the job summary; reports uploaded
+  - **source-scan** (stages 2–4): **Semgrep CE** (`p/default` + `p/java`), **Trivy fs** (dependencies in `pom.xml` + Dockerfile misconfig), **Hadolint**
+  - **image** (stages 5–7, only if both pass): **multi-arch buildx** (amd64 + arm64) with GHA layer cache → load amd64 → **Trivy image** → **Syft SBOM** (SPDX JSON) as an artifact
+- `.github/workflows/wallet-service.yml`: a **thin caller**, path-filtered to `services/wallet-service/**` and the two workflow files
+- `services/wallet-service/.trivyignore`: empty, with the rule that every exception needs a reason and a review date
+- `pom.xml`: JaCoCo `check` execution; the bootstrap class (`main` → `SpringApplication.run`) excluded from coverage
+
+### Why these choices
+- **One reusable pipeline, thin callers:** security gates live in one file. A new service gets every gate by adding a 10-line caller; no service can quietly drop a scan. The same pattern a platform team uses for many repos.
+- **Gates in parallel, image last:** tests and source scans don't depend on each other, so they run side by side; the image is only built if both pass (no point scanning an image of code that fails tests). Keeps the run well under the 10-minute target.
+- **All scans run, then fail together** (`continue-on-error` + a final check step): one run shows *every* problem instead of one at a time.
+- **No QEMU:** the Dockerfile's build stage runs on `$BUILDPLATFORM`, and the per-architecture runtime stage only has `COPY`, so building arm64 on an amd64 runner executes nothing under emulation.
+- **Two builds, one cache:** the multi-arch build proves both architectures build and fills the GHA cache; the second build (amd64, `load: true`) comes straight from cache so the scanners can read it. Only amd64 is scanned: both arches have the same jars and the same distroless packages.
+- **Scanner containers pinned by digest** (Trivy, Semgrep, Hadolint, Syft) instead of third-party actions: fewer actions with access to the job, exact versions, same commands as the local `make` targets.
+- **`--ignore-unfixed` + `.trivyignore` with reasons:** CVEs with no released fix can't be acted on; anything else needs a written, dated exception.
+- **Trivy DB cached once per day:** the vulnerability + Java DBs are ~1 GB; caching per day keeps data fresh without downloading it on every run.
+- **Coverage gate excludes only the bootstrap class:** it's one line of framework wiring with nothing to test; excluding it keeps the gate honest for real code.
+- **Path filters on the caller:** a docs-only change or (from Phase 3) a bot PR to `gitops/` doesn't rebuild the service.
+- **`language` input already exists**, failing clearly for anything but `java`: Go, Python and Node.js arrive in P4-01 without changing callers.
+
+### Problems I hit and how I fixed them
+- **Trivy fs got rate-limited by Maven Central** (`429 Too Many Requests … blocks all subsequent requests from this IP` for 30 minutes). To scan `pom.xml`, Trivy downloads every dependency POM itself; shared CI runner IPs hit the limit too. Fix: resolve dependencies with Maven first (`dependency:resolve`, using the `setup-java` Maven cache) and mount `~/.m2/repository` read-only into the Trivy container, so it never calls Central.
+- **A vacuous coverage gate:** with only the bootstrap class (now excluded), there are zero measured lines, so the gate passes trivially today. It bites from P1-15 onward; the failure test below proves it works.
+
+### How I verified it
+Locally, before pushing:
+- actionlint (with shellcheck) clean on all workflows; pre-commit hooks pass
+- `./mvnw verify`: 3 tests pass, "All coverage checks have been met"
+- Semgrep with the exact CI flags: 203 rules, 11 files, 0 findings
+- Trivy fs with the local Maven repository: `pom.xml` 0 vulnerabilities, Dockerfile 0 misconfigurations
+- Syft against the P1-04 image: SPDX 2.3, 71 packages
+
+On GitHub *(to be confirmed)*:
+- [ ] First run on `main` green; total time ___ min (target < 10)
+- [ ] A docs-only commit doesn't start `wallet-service`
+- [ ] Each gate fails once on a PR, then reverted: vulnerable dependency (Trivy), Dockerfile lint error (Hadolint), coverage below the gate (JaCoCo)
+
+### Concepts I learned
+- Reusable workflows (`workflow_call`), inputs, and how permissions are capped by the caller.
+- `needs:` for job ordering; `continue-on-error` + `steps.<id>.outcome` to collect results.
+- BuildKit `$BUILDPLATFORM`, GHA cache (`type=gha`, `mode=max`, `scope`).
+- SCA (Trivy fs on manifests) vs image scanning (Trivy image on what actually ships) vs SAST (Semgrep on code).
+- SBOMs (SPDX) and why they matter for incident response ("are we affected by CVE-X?").
+
+### Questions this answers
+- **Q: How do you make sure every team's pipeline runs the security scans?** A reusable workflow owned by the platform team; services call it and can't remove gates. Branch protection then requires its checks (P1-07).
+- **Q: SAST, SCA, image scanning: what's the difference?** SAST reads your code for bugs (Semgrep); SCA checks declared dependencies (Trivy fs on `pom.xml`); image scanning checks what's really in the shipped image, OS packages included (Trivy image).
+- **Q: Why scan both the source and the image?** Source scans fail fast, before a build; the image scan sees the base image's OS packages and the exact resolved jars.
+- **Q: What is an SBOM for?** An inventory of every package in an image. When a new CVE drops, you search SBOMs to know within minutes which images are affected, without rebuilding anything.
+- **Q: Your CI hits rate limits from a public registry. What do you do?** Cache dependencies, resolve once and reuse (here `~/.m2`), and in production use a pull-through cache or proxy (ECR pull-through, Nexus).
