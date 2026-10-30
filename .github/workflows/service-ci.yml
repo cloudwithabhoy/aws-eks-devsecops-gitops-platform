@@ -35,8 +35,8 @@ env:
 
 jobs:
   # ---- Stage 1: lint + unit tests + coverage gate --------------------------------
-  test:
-    name: test (${{ inputs.language }})
+  unit-tests:
+    name: Unit tests + coverage (${{ inputs.language }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -93,8 +93,8 @@ jobs:
           if-no-files-found: ignore
 
   # ---- Stages 2-4: source scans (SAST, dependencies, Dockerfile) -----------------
-  source-scan:
-    name: source scan
+  security-scan:
+    name: Security scan (SAST, deps, Dockerfile)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -181,9 +181,9 @@ jobs:
           exit 1
 
   # ---- Stages 5-7: build, image scan, SBOM ---------------------------------------
-  image:
-    name: image
-    needs: [test, source-scan]
+  build-image:
+    name: Build + image scan + SBOM
+    needs: [unit-tests, security-scan]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

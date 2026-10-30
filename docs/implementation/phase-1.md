@@ -258,9 +258,9 @@ Plan: [phase-1.md](../plan/phase-1.md)
 
 ### What I built
 - `.github/workflows/service-ci.yml`: a **reusable** workflow (`workflow_call`) with inputs `service` and `language`, three jobs:
-  - **test** (stage 1): `./mvnw verify` = compile + tests + **JaCoCo gate (≥ 70 % lines)**; coverage % in the job summary; reports uploaded
-  - **source-scan** (stages 2–4): **Semgrep CE** (`p/default` + `p/java`), **Trivy fs** (dependencies in `pom.xml` + Dockerfile misconfig), **Hadolint**
-  - **image** (stages 5–7, only if both pass): **multi-arch buildx** (amd64 + arm64) with GHA layer cache → load amd64 → **Trivy image** → **Syft SBOM** (SPDX JSON) as an artifact
+  - **unit-tests** (stage 1): `./mvnw verify` = compile + tests + **JaCoCo gate (≥ 70 % lines)**; coverage % in the job summary; reports uploaded
+  - **security-scan** (stages 2–4): **Semgrep CE** (`p/default` + `p/java`), **Trivy fs** (dependencies in `pom.xml` + Dockerfile misconfig), **Hadolint**
+  - **build-image** (stages 5–7, only if both pass): **multi-arch buildx** (amd64 + arm64) with GHA layer cache → load amd64 → **Trivy image** → **Syft SBOM** (SPDX JSON) as an artifact
 - `.github/workflows/wallet-service.yml`: a **thin caller**, path-filtered to `services/wallet-service/**` and the two workflow files
 - `services/wallet-service/.trivyignore`: empty, with the rule that every exception needs a reason and a review date
 - `pom.xml`: JaCoCo `check` execution; the bootstrap class (`main` → `SpringApplication.run`) excluded from coverage
