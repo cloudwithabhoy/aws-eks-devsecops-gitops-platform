@@ -151,6 +151,9 @@ jobs:
       - name: Hadolint (Dockerfile lint)
         id: hadolint
         continue-on-error: true
+        # Explicit `shell: bash` adds pipefail; the default shell would report tee's exit code
+        # and pass the step even when Hadolint fails (caught by the P1-06 gates demo)
+        shell: bash
         run: docker run --rm -i "$HADOLINT_IMAGE" < "$SERVICE_DIR/Dockerfile" | tee hadolint.txt
 
       - name: Job summary
