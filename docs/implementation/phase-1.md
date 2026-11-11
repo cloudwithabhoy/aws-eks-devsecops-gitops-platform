@@ -265,6 +265,40 @@ Plan: [phase-1.md](../plan/phase-1.md)
 - `services/wallet-service/.trivyignore`: empty, with the rule that every exception needs a reason and a review date
 - `pom.xml`: JaCoCo `check` execution; the bootstrap class (`main` → `SpringApplication.run`) excluded from coverage
 
+### How the pipeline is wired
+Two files, two jobs:
+
+| | `wallet-service.yml` (caller) | `service-ci.yml` (reusable) |
+|---|---|---|
+| Answers | **When** and **which service** | **What** runs and **how** |
+| Trigger | push / PR touching `services/wallet-service/**`, or manual | only `workflow_call`; never runs on its own |
+| Contents | path filters, `permissions`, `concurrency`, `uses:` + inputs | every job and gate |
+| How many | one per service (~30 lines) | one for the whole repo |
+
+Like a function and its call: `service-ci` is `build_service(service, language)`, `wallet-service.yml` is "when wallet-service changes → `build_service("wallet-service", "java")`". That's why the checks show as `ci / …`: `ci` is the caller's job, the part after the slash is the job inside `service-ci`.
+
+```
+wallet-service.yml (trigger)
+   └── ci: uses service-ci.yml
+          ├── unit-tests     ─┐  start together (no needs)
+          ├── security-scan  ─┤
+          └── build-image ◄───┘  needs: [unit-tests, security-scan]
+```
+
+What controls the order:
+- **Jobs run in parallel by default.** Nothing says "parallel"; a job without `needs:` simply starts at once.
+- **`needs: [unit-tests, security-scan]`** makes `build-image` wait for both; if either fails, it's **skipped**.
+- **Each job is its own VM** (`runs-on: ubuntu-24.04`). That's what makes parallel possible, and also why jobs share nothing: each one checks out the code again, and files move between jobs only through artifacts.
+- **Steps inside a job always run in order**, top to bottom.
+
+Why split it this way:
+- **Two kinds of question:** `unit-tests` asks "does the code work?", `security-scan` asks "is it safe?". A red check on the PR says which kind of fix is needed without opening logs.
+- **Speed:** in parallel the gates take as long as the slower one (~1 min), not the sum.
+- **Every problem in one run:** the gates demo showed the coverage failure and all three scan failures together.
+- **The expensive part goes last:** the multi-arch build (~2 min) only runs for code that passed both, so failing code never becomes an image.
+
+Naming: each job has an **ID** (`unit-tests`, used by `needs:`, short and no spaces) and a **`name:`** (what the PR page shows, e.g. *Unit tests + coverage (java)*). They were renamed from `test` / `source scan` / `image` **before** P1-07, because branch protection matches required checks by their displayed name; renaming afterwards leaves `main` waiting for a check that never runs.
+
 ### Why these choices
 - **One reusable pipeline, thin callers:** security gates live in one file. A new service gets every gate by adding a 10-line caller; no service can quietly drop a scan. The same pattern a platform team uses for many repos.
 - **Gates in parallel, image last:** tests and source scans don't depend on each other, so they run side by side; the image is only built if both pass (no point scanning an image of code that fails tests). Keeps the run well under the 10-minute target.
@@ -280,6 +314,7 @@ Plan: [phase-1.md](../plan/phase-1.md)
 
 ### Problems I hit and how I fixed them
 - **Trivy fs got rate-limited by Maven Central** (`429 Too Many Requests … blocks all subsequent requests from this IP` for 30 minutes). To scan `pom.xml`, Trivy downloads every dependency POM itself; shared CI runner IPs hit the limit too. Fix: resolve dependencies with Maven first (`dependency:resolve`, using the `setup-java` Maven cache) and mount `~/.m2/repository` read-only into the Trivy container, so it never calls Central.
+- **Hadolint failed but the step passed.** In the gates demo Hadolint printed `DL3020 error: Use COPY instead of ADD` and exited 1, yet the step was green. The step was `hadolint … | tee hadolint.txt`, and GitHub's default shell is `bash -e` **without `pipefail`**, so a pipeline returns the *last* command's exit code: `tee`'s 0. Fix: `shell: bash` on the step, which GitHub runs as `bash -eo pipefail`. Lesson: a gate isn't proven until you've seen it fail; this one looked enforced and wasn't.
 - **A vacuous coverage gate:** with only the bootstrap class (now excluded), there are zero measured lines, so the gate passes trivially today. It bites from P1-15 onward; the failure test below proves it works.
 
 ### How I verified it
@@ -290,14 +325,27 @@ Locally, before pushing:
 - Trivy fs with the local Maven repository: `pom.xml` 0 vulnerabilities, Dockerfile 0 misconfigurations
 - Syft against the P1-04 image: SPDX 2.3, 71 packages
 
-On GitHub *(to be confirmed)*:
-- [ ] First run on `main` green; total time ___ min (target < 10)
+On GitHub:
+- [x] First run on `main` green: **4 min 34 s** (target < 10); the next run, with warm caches, **3 min 26 s** (tests 33 s and scans 1 min 11 s in parallel, then build + image scan + SBOM 2 min 9 s)
 - [ ] A docs-only commit doesn't start `wallet-service`
-- [ ] Each gate fails once on a PR, then reverted: vulnerable dependency (Trivy), Dockerfile lint error (Hadolint), coverage below the gate (JaCoCo)
+- [x] **Gates demo** (PR #1 from `test/gates-demo`, closed without merging), one planted failure per gate:
+
+  | Planted change | Gate | Result |
+  |---|---|---|
+  | `Untested.java`, no tests | JaCoCo 70 % | ❌ "Coverage checks have not been met" |
+  | MD5 in the same class | Semgrep | ❌ |
+  | `commons-text` 1.9 (Text4Shell, CVE-2022-42889) | Trivy fs | ❌ |
+  | `ADD src/ src/` in the Dockerfile | Hadolint | ❌ only after the `pipefail` fix (see Problems) |
+  | fake AWS key in `leak-test.txt` | Gitleaks (CI) | ❌ |
+  | | Build + image scan + SBOM | ⏭️ skipped, as designed |
+
+  The local Gitleaks hook blocked that commit first (`RuleID: aws-access-token`); it went through only with `git commit --no-verify`, which is exactly why the CI job exists.
 
 ### Concepts I learned
 - Reusable workflows (`workflow_call`), inputs, and how permissions are capped by the caller.
-- `needs:` for job ordering; `continue-on-error` + `steps.<id>.outcome` to collect results.
+- Jobs are parallel by default, each on its own VM; `needs:` orders them; steps within a job are sequential.
+- `continue-on-error` + `steps.<id>.outcome` to collect results.
+- The default `run:` shell has no `pipefail`; `shell: bash` adds it.
 - BuildKit `$BUILDPLATFORM`, GHA cache (`type=gha`, `mode=max`, `scope`).
 - SCA (Trivy fs on manifests) vs image scanning (Trivy image on what actually ships) vs SAST (Semgrep on code).
 - SBOMs (SPDX) and why they matter for incident response ("are we affected by CVE-X?").
@@ -307,4 +355,6 @@ On GitHub *(to be confirmed)*:
 - **Q: SAST, SCA, image scanning: what's the difference?** SAST reads your code for bugs (Semgrep); SCA checks declared dependencies (Trivy fs on `pom.xml`); image scanning checks what's really in the shipped image, OS packages included (Trivy image).
 - **Q: Why scan both the source and the image?** Source scans fail fast, before a build; the image scan sees the base image's OS packages and the exact resolved jars.
 - **Q: What is an SBOM for?** An inventory of every package in an image. When a new CVE drops, you search SBOMs to know within minutes which images are affected, without rebuilding anything.
+- **Q: How do jobs run in parallel in GitHub Actions?** Every job gets its own runner and starts immediately unless it declares `needs:`. Steps inside a job are sequential. Jobs share no files; use artifacts to pass them.
+- **Q: How do you know a security gate actually blocks?** Make it fail on purpose. My gates demo planted one failure per gate and found that Hadolint's failure was hidden by `| tee` without `pipefail`.
 - **Q: Your CI hits rate limits from a public registry. What do you do?** Cache dependencies, resolve once and reuse (here `~/.m2`), and in production use a pull-through cache or proxy (ECR pull-through, Nexus).
