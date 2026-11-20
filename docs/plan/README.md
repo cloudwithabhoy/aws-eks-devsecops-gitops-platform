@@ -65,7 +65,7 @@ One section per task in `docs/implementation/phase-N.md`, using the same task ID
 
 | Phase | Plan | Status |
 |---|---|---|
-| 1 | [phase-1.md](phase-1.md) | 🔵 In progress: 4 of 20 tasks done, 2 built |
+| 1 | [phase-1.md](phase-1.md) | 🔵 In progress: 6 of 20 tasks done |
 | 2 | [phase-2.md](phase-2.md) | Draft |
 | 3 | [phase-3.md](phase-3.md) | Draft |
 | 4 | [phase-4.md](phase-4.md) | Draft |
@@ -81,8 +81,8 @@ One section per task in `docs/implementation/phase-N.md`, using the same task ID
 | P1-02 pre-commit and Makefile skeleton | M1 Repo foundation | ✅ | |
 | P1-03 wallet-service skeleton | M2 Walking skeleton | ✅ | |
 | P1-04 Hardened multi-arch Dockerfile | M2 Walking skeleton | ✅ | |
-| P1-05 Repo-wide checks workflow | M3 CI v1 | 🟡 | Open: confirm `repo-checks` green on `main` |
-| P1-06 Reusable service CI workflow | M3 CI v1 | 🟡 | Open: confirm a docs-only commit skips `wallet-service` |
+| P1-05 Repo-wide checks workflow | M3 CI v1 | ✅ | |
+| P1-06 Reusable service CI workflow | M3 CI v1 | ✅ | |
 | P1-07 Protect main | M3 CI v1 | ⬜ | **Next** |
 | P1-08 AWS account baseline | M4 AWS bootstrap + CI v2 | ⬜ | |
 | P1-09 `infra/bootstrap` Terraform | M4 AWS bootstrap + CI v2 | ⬜ | |

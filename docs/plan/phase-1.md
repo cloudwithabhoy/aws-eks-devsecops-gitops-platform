@@ -8,7 +8,7 @@
 
 - [ ] `main` is protected; merging needs a PR with green required checks
 - [ ] A merge that changes `services/wallet-service/**` produces an image in ECR tagged with the git SHA, **Cosign-signed**, with an SBOM attestation, and `cosign verify` passes
-- [ ] The CI fails on a planted secret, a CRITICAL/HIGH CVE, a Dockerfile lint error and a coverage drop (each proven once, then reverted)
+- [x] The CI fails on a planted secret, a CRITICAL/HIGH CVE, a Dockerfile lint error and a coverage drop (each proven once, then reverted)
 - [ ] The Auth0 dev tenant is fully defined in Terraform; `plan` shows no drift
 - [ ] Locally: `make up-local` → get a dev token → check balance → top up → transfer → history reconciles to the cent
 - [ ] AWS spend for the phase stays under **$1/month** (no cluster yet)
@@ -114,8 +114,8 @@ flowchart LR
   - Gitleaks over the full history
   - Least-privilege `permissions:`; actions pinned by commit SHA; `concurrency` cancels superseded runs
 - **Acceptance criteria:**
-  - [ ] Green on `main`
-  - [ ] A PR with a planted test secret fails (proven, then reverted)
+  - [x] Green on `main`
+  - [x] A PR with a planted test secret fails (proven, then reverted)
 - **Depends on:** P1-02
 - **Runs on:** GitHub Actions
 - **Output:** `.github/workflows/repo-checks.yml`
@@ -136,9 +136,9 @@ flowchart LR
   - A job summary showing scan results
 - **Out of scope:** pushing, signing (P1-10); the GitOps PR (Phase 3); ZAP (Phase 4)
 - **Acceptance criteria:**
-  - [ ] Changing only `docs/` does **not** run the service pipeline
-  - [ ] Each gate is proven to fail once: a vulnerable dependency, a Dockerfile lint error, coverage below the gate
-  - [ ] Runs in under 10 minutes, using dependency and layer caching
+  - [x] Changing only `docs/` does **not** run the service pipeline
+  - [x] Each gate is proven to fail once: a vulnerable dependency, a Dockerfile lint error, coverage below the gate
+  - [x] Runs in under 10 minutes, using dependency and layer caching
 - **Depends on:** P1-04, P1-05
 - **Runs on:** GitHub Actions
 - **Output:** `.github/workflows/service-ci.yml`, `.github/workflows/wallet-service.yml`, `services/wallet-service/.trivyignore`
