@@ -30,6 +30,14 @@ repos:
         # Direct commits to main are allowed until branch protection lands in P1-07
         stages: [manual]
 
+  # Lints GitHub Actions workflows: syntax, expressions, job references, and
+  # shellcheck on run: blocks (shellcheck only when it's on PATH; CI runners have it).
+  # Runs only when a file under .github/workflows/ changes.
+  - repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca  # frozen: v1.7.12
+    hooks:
+      - id: actionlint
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e  # frozen: v8.30.1
     hooks:
