@@ -234,8 +234,8 @@ Plan: [phase-1.md](../plan/phase-1.md)
 - **The first CI runs failed although every hook passed on my laptop.** `.gitattributes` checks `*.cmd` files out with CRLF (correct for Windows batch files), but the `mixed-line-ending --fix=lf` hook then "fixed" `mvnw.cmd` to LF and failed. My local copy predated the CRLF rule, so it only showed up on a **fresh clone**, which is exactly what CI uses. Reproduced by cloning the repo into a temp folder and running the hooks there; fixed by excluding `\.(bat|cmd|ps1)$` from that hook. Lesson: when CI and local disagree, reproduce on a clean checkout, not in the working copy.
 
 ### How I verified it
-- [ ] Pushed to `main`: both jobs green *(to be confirmed after the first run)*
-- [ ] Planted-secret PR: a branch with a fake AWS key committed with `--no-verify`; the `gitleaks` job fails and its summary names the rule and file; PR closed and branch deleted *(to be confirmed)*
+- [x] Pushed to `main`: both jobs green (confirmed 2026-11-20 on the tracker commit `49d1c0e`)
+- [x] Planted secret fails CI: proven in the P1-06 gates demo (PR #1), where a fake AWS key committed with `--no-verify` failed the `gitleaks` job (`RuleID: aws-access-token`); PR closed without merging
 
 ### Concepts I learned
 - `GITHUB_TOKEN` and the `permissions:` block; workflow-level vs job-level permissions.
@@ -327,7 +327,7 @@ Locally, before pushing:
 
 On GitHub:
 - [x] First run on `main` green: **4 min 34 s** (target < 10); the next run, with warm caches, **3 min 26 s** (tests 33 s and scans 1 min 11 s in parallel, then build + image scan + SBOM 2 min 9 s)
-- [ ] A docs-only commit doesn't start `wallet-service`
+- [x] A docs-only commit doesn't start `wallet-service`: confirmed 2026-11-20 on `49d1c0e` (only `repo-checks` ran)
 - [x] **Gates demo** (PR #1 from `test/gates-demo`, closed without merging), one planted failure per gate:
 
   | Planted change | Gate | Result |

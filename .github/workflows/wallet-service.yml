@@ -1,19 +1,21 @@
 # Thin caller: wallet-service runs the golden pipeline only when its own files change.
-# Bot PRs that touch only gitops/ (Phase 3) don't match these paths, so they never retrigger CI.
+#
+# The path filter lives in a job, not in the PR trigger: `wallet-service result` is a
+# required status check on main, and a workflow that never starts never reports it,
+# so a docs-only PR would wait forever. Here the workflow always starts, the pipeline
+# is skipped when nothing relevant changed, and `result` reports pass/fail either way.
+# Bot PRs that touch only gitops/ (Phase 3) run just the cheap `changes` job.
 name: wallet-service
 
 on:
   push:
     branches: [main]
+    # Pushes aren't gated by required checks, so a trigger-level filter is safe here
     paths:
       - services/wallet-service/**
       - .github/workflows/service-ci.yml
       - .github/workflows/wallet-service.yml
   pull_request:
-    paths:
-      - services/wallet-service/**
-      - .github/workflows/service-ci.yml
-      - .github/workflows/wallet-service.yml
   workflow_dispatch:
 
 # A reusable workflow can never get more permissions than its caller grants
@@ -25,8 +27,62 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Detect wallet-service changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read # gh pr diff
+    outputs:
+      run: ${{ steps.filter.outputs.run }}
+    steps:
+      - name: Check changed paths
+        id: filter
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          PATTERN: ^(services/wallet-service/|\.github/workflows/(service-ci|wallet-service)\.yml$)
+        run: |
+          # push and workflow_dispatch: the trigger already decided, so always run
+          if [[ "$EVENT" != "pull_request" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Fail safe: if the file list can't be fetched (e.g. a huge diff), run the pipeline
+          if ! files=$(gh pr diff "$PR" --name-only --repo "$REPO"); then
+            echo "::warning::Could not list changed files; running the pipeline to be safe"
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if grep -qE "$PATTERN" <<< "$files"; then run=true; else run=false; fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "wallet-service pipeline needed: **$run**" >> "$GITHUB_STEP_SUMMARY"
+
   ci:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     uses: ./.github/workflows/service-ci.yml
     with:
       service: wallet-service
       language: java
+
+  # The one check main's ruleset requires for this service. `skipped` counts as a pass;
+  # only a failed or cancelled job blocks the merge.
+  result:
+    name: wallet-service result
+    needs: [changes, ci]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Fail if the pipeline did not pass
+        shell: bash
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CI: ${{ needs.ci.result }}
+        run: |
+          echo "changes=$CHANGES ci=$CI"
+          if [[ "$CHANGES" != "success" || "$CI" == "failure" || "$CI" == "cancelled" ]]; then
+            exit 1
+          fi

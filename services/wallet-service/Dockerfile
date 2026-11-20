@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/root/.m2 \
 # Distroless: JRE and CA certs only. No shell, no package manager, so far fewer
 # CVEs and nothing for an attacker to `exec` into.
 # Debian 13 (current stable): Trivy found 17 HIGH/CRITICAL OS CVEs in the debian12 variant, 4 (unfixed) here
-FROM gcr.io/distroless/java21-debian13:nonroot@sha256:a2aeb5a7a714cfe928b31fdf67b2d23f503ea6b9612705af062de22e0c50ba77
+FROM gcr.io/distroless/java21-debian13:nonroot@sha256:cddca4cc6b1dfc76142e5c1a1d00ce7a79bcc1292ad65d34227794f9d371a496
 
 LABEL org.opencontainers.image.title="wallet-service" \
       org.opencontainers.image.description="LedgerPay balances and double-entry ledger" \
