@@ -1,6 +1,6 @@
 # LedgerPay — End-to-End DevSecOps & GitOps Platform on AWS EKS
 
-> **Status: work in progress, Phase 1 (foundation, CI-first, wallet core). See the [Phase 1 plan](docs/plan/phase-1.md).** This README grows with the platform.
+> **Status: work in progress, Phase 1 (foundation, CI-first, wallet core). See the [Phase 1 plan](docs/plan/phase-1.md) and the [task-level progress tracker](docs/plan/README.md#status).** This README grows with the platform.
 
 A production-style platform on AWS EKS, built with open-source tooling (plus Auth0's free plan for customer login). **LedgerPay**, a small digital wallet / P2P payments app, is the workload that gives the platform something real to build, secure, deploy and observe.
 

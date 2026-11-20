@@ -57,15 +57,46 @@ One section per task in `docs/implementation/phase-N.md`, using the same task ID
 
 ## Status
 
+**The single source of truth for progress.** Updated in the same commit as each task's build-log entry.
+
+**Legend:** ✅ done (acceptance criteria pass) · 🟡 built, a check still open · 🔵 in progress · ⬜ not started
+
+### Phases
+
 | Phase | Plan | Status |
 |---|---|---|
-| 1 | [phase-1.md](phase-1.md) | Final, not started |
+| 1 | [phase-1.md](phase-1.md) | 🔵 In progress: 4 of 20 tasks done, 2 built |
 | 2 | [phase-2.md](phase-2.md) | Draft |
 | 3 | [phase-3.md](phase-3.md) | Draft |
 | 4 | [phase-4.md](phase-4.md) | Draft |
 | 5 | [phase-5.md](phase-5.md) | Draft |
 | 6 | [phase-6.md](phase-6.md) | Draft |
 | 7 | [phase-7.md](phase-7.md) | Draft |
+
+### Current phase: Phase 1 tasks
+
+| Task | Milestone | Status | Notes |
+|---|---|---|---|
+| P1-01 Repo hygiene and first push | M1 Repo foundation | ✅ | |
+| P1-02 pre-commit and Makefile skeleton | M1 Repo foundation | ✅ | |
+| P1-03 wallet-service skeleton | M2 Walking skeleton | ✅ | |
+| P1-04 Hardened multi-arch Dockerfile | M2 Walking skeleton | ✅ | |
+| P1-05 Repo-wide checks workflow | M3 CI v1 | 🟡 | Open: confirm `repo-checks` green on `main` |
+| P1-06 Reusable service CI workflow | M3 CI v1 | 🟡 | Open: confirm a docs-only commit skips `wallet-service` |
+| P1-07 Protect main | M3 CI v1 | ⬜ | **Next** |
+| P1-08 AWS account baseline | M4 AWS bootstrap + CI v2 | ⬜ | |
+| P1-09 `infra/bootstrap` Terraform | M4 AWS bootstrap + CI v2 | ⬜ | |
+| P1-10 CI v2: sign and push | M4 AWS bootstrap + CI v2 | ⬜ | |
+| P1-11 IaC CI | M4 AWS bootstrap + CI v2 | ⬜ | |
+| P1-12 Auth0 tenant setup | M5 Auth0 as code | ⬜ | |
+| P1-13 Auth0 Terraform module and dev config | M5 Auth0 as code | ⬜ | |
+| P1-14 Observability contract | M6 Ledger | ⬜ | |
+| P1-15 Ledger schema (Flyway) | M6 Ledger | ⬜ | |
+| P1-16 Ledger domain logic | M6 Ledger | ⬜ | |
+| P1-17 Internal ledger API | M6 Ledger | ⬜ | |
+| P1-18 Public API + Auth0 JWT validation | M6 Ledger | ⬜ | |
+| P1-19 Local stack, OpenAPI and service docs | M6 Ledger | ⬜ | |
+| P1-20 Phase 1 wrap-up | M6 Ledger | ⬜ | |
 
 ### Cross-phase moves made while planning
 
