@@ -358,3 +358,69 @@ On GitHub:
 - **Q: How do jobs run in parallel in GitHub Actions?** Every job gets its own runner and starts immediately unless it declares `needs:`. Steps inside a job are sequential. Jobs share no files; use artifacts to pass them.
 - **Q: How do you know a security gate actually blocks?** Make it fail on purpose. My gates demo planted one failure per gate and found that Hadolint's failure was hidden by `| tee` without `pipefail`.
 - **Q: Your CI hits rate limits from a public registry. What do you do?** Cache dependencies, resolve once and reuse (here `~/.m2`), and in production use a pull-through cache or proxy (ECR pull-through, Nexus).
+
+---
+
+## P1-07: Protect main
+
+**Date:** 2026-11-24 · **PRs:** #2 (`316f524`, workflow + digest bump), #3 (blocked-merge test, closed), this PR (runbook + local guard)
+
+### What I built
+- Ruleset **`protect-main`** on the default branch: PR required (0 approvals, squash only), required status checks with "branches must be up to date", linear history, no force-push, no deletion, **empty bypass list**
+- Required checks: `pre-commit (all files)`, `gitleaks (full history)`, `wallet-service result`
+- `wallet-service.yml` reworked so a path-filtered service can be a required check: `changes` → `ci` → `result` (details in the runbook, section 3)
+- actionlint added to pre-commit (runs in CI through `repo-checks`, with shellcheck on runners)
+- `no-commit-to-branch` hook switched on locally; skipped in CI
+- Repo features off (Issues, Wiki, Discussions, Projects); squash-only merges
+- `docs/runbooks/github-repo-settings.md`: every setting with its reason, the required-check rules, and break-glass
+
+### How
+1. Branch `ci/p1-07-protect-main` → workflow rework + actionlint → PR #2 so the check names exist once
+2. Trivy image failed on the PR (see Problems) → bumped the distroless digest → green → merged
+3. Created the ruleset, picked the checks, proved both acceptance criteria
+4. This PR: runbook, local guard, build log
+
+### Why these choices
+- **Rulesets over classic branch protection:** explicit bypass list, can target branches by pattern, several rulesets can layer, and the "rules applying to this branch" view/API makes the effective policy checkable.
+- **0 approvals:** GitHub won't let the author approve their own PR; on a solo repo the required checks are the gate. A team would add 1–2 approvals + CODEOWNERS.
+- **Squash only + linear history:** one task = one commit on `main`, easy to revert and bisect.
+- **"Branches must be up to date":** two PRs that are green on their own can still break `main` together.
+- **Job-level path filter + `result` job** instead of trigger-level `paths:` (which leaves a required check pending forever) or requiring only always-on checks (which would let a red service pipeline merge).
+- **`gh pr diff` instead of a third-party paths-filter action:** no new dependency, no checkout, only `pull-requests: read`; fails safe (runs the pipeline) if the file list can't be fetched.
+- **Empty bypass list:** the admin is the most likely person to "just push this one fix". Break-glass is disabling the ruleset, which is visible and deliberate.
+
+### Problems I hit and how I fixed them
+- **Trivy image failed with no code change.** New fixable CRITICAL/HIGH CVEs had been published against the distroless runtime image pinned by digest in P1-04 (Trivy fs on `pom.xml` stayed green, so the app dependencies were fine). Google had rebuilt `java21-debian13:nonroot`; bumped `a2aeb5a7…` → `cddca4cc…` (checked it still includes arm64). Security fixes skip my two-week soak rule. Renovate (Phase 2) will open these bumps automatically. <!-- TODO(owner): add the CVE IDs from the failed Trivy image run on PR #2 -->
+- **The ruleset was "Active" but protected nothing.** I skipped *Target branches → Include default branch*, so `conditions.ref_name.include` was empty and a test push (`75159c3`) landed on `main`. Found by checking `GET /repos/…/rules/branches/main`, which returned `[]`. After adding the target, a force-push to remove the test commit was rejected, so it stays in history as evidence. Lesson, again: a control isn't proven until you've seen it block.
+- **A required check that no job reports.** The third check was saved as `wallet-service` (typed) instead of `wallet-service result` (picked from the list). Every future PR would have waited forever. Caught in the GH013 output (`Required status check "wallet-service" is expected`) and fixed before the next PR.
+- **The PR #2 squash commit got a poor message** (`Ci/p1 07 protect main (#2)`, no `Refs:`), generated from the branch name. Not worth a force-push; fixed going forward by setting the squash default message to "PR title and description" and checking the title in the merge dialog.
+- **A partial edit put `pull_request: read` under `on:`.** `read` is a permission level, not a trigger option. actionlint now catches this class of mistake before a push.
+
+### How I verified it
+- [x] **A direct push to `main` is rejected:**
+  ```
+  remote: error: GH013: Repository rule violations found for refs/heads/main.
+  remote: - Cannot force-push to this branch
+  remote: - Changes must be made through a pull request.
+  ! [remote rejected] main -> main (push declined due to repository rule violations)
+  ```
+- [x] **A PR with a failing check can't be merged:** PR #3 (trailing whitespace, committed with `--no-verify`): `pre-commit` ❌ → "Merging is blocked"; closed without merging
+- [x] **A docs-only PR still reports the service check:** on PR #3, `ci` was skipped and `wallet-service result` ✅
+- [x] PR #2 (workflow change): `Detect wallet-service changes` → true, full pipeline ran, `wallet-service result` ✅ after the digest bump
+- [x] `GET /repos/…/rulesets/27960591`: target `~DEFAULT_BRANCH`, 5 rules, the three checks with source GitHub Actions
+
+### Concepts I learned
+- Rulesets: enforcement modes, targets (`~DEFAULT_BRANCH`), bypass actors, the effective-rules API
+- Required status checks match on **check name**; skipped jobs pass, workflows that never started are missing
+- `if: always()` and `needs.<job>.result` (`success`, `failure`, `cancelled`, `skipped`)
+- Pinned digests are reproducible but go stale; vulnerability databases change daily, so re-scan on every build
+- Server-side enforcement (ruleset) vs client-side guard (pre-commit `no-commit-to-branch`): the guard is convenience, the ruleset is the control
+
+### Questions this answers
+- **Q: How do you enforce that every change goes through CI?** A ruleset on `main`: PRs only, required status checks from the shared pipeline, no force-push or deletion, no bypass actors.
+- **Q: Required checks and path-filtered workflows don't mix. Why, and what did you do?** A workflow that doesn't start never reports its check, so the PR waits forever. I moved the filter into a job and added an always-running `result` job that's the required check; a skipped pipeline counts as a pass, a failed one blocks.
+- **Q: Why 0 required approvals?** Solo repo; GitHub doesn't allow self-approval. The checks are the gate. In a team: 1–2 approvals, CODEOWNERS, and "dismiss stale approvals".
+- **Q: What does "require branches to be up to date" protect against?** Two PRs that each pass on an older `main` but conflict semantically once both merge.
+- **Q: Your pipeline passed yesterday and fails today with no code change. Why?** New CVEs were published against an unchanged image. Pin by digest for reproducibility, re-scan every build, and let Renovate keep pins fresh.
+- **Q: How would you handle an emergency when CI is down?** A documented break-glass: disable the ruleset (never add a bypass actor), make the minimum fix, re-enable at once, and record it.
+- **Q: How did you know the ruleset worked?** I tried to break it: a direct push, a force-push and a PR with a failing check. The first attempt showed it was targeting nothing.

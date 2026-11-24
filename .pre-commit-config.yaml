@@ -27,8 +27,8 @@ repos:
       - id: detect-private-key
       - id: no-commit-to-branch
         args: [--branch, main]
-        # Direct commits to main are allowed until branch protection lands in P1-07
-        stages: [manual]
+        # main only changes through PRs (ruleset, P1-07); this catches the mistake before
+        # the push is rejected. Skipped in CI, where pushes to main run on main.
 
   # Lints GitHub Actions workflows: syntax, expressions, job references, and
   # shellcheck on run: blocks (shellcheck only when it's on PATH; CI runners have it).
