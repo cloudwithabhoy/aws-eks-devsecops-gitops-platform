@@ -107,3 +107,4 @@ One section per task in `docs/implementation/phase-N.md`, using the same task ID
 | Minimal Prometheus | Phase 5 → **4** | Canary analysis needs it |
 | k6 | Phase 7 → **4** | Canary analysis and the demo need steady traffic |
 | Kiali | Phase 4 → **5** | Its service graph needs the full Prometheus setup |
+trailling space 
