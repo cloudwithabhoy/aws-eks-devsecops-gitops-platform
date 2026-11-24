@@ -6,7 +6,7 @@
 
 **Exit criteria** (all must hold):
 
-- [ ] `main` is protected; merging needs a PR with green required checks
+- [x] `main` is protected; merging needs a PR with green required checks
 - [ ] A merge that changes `services/wallet-service/**` produces an image in ECR tagged with the git SHA, **Cosign-signed**, with an SBOM attestation, and `cosign verify` passes
 - [x] The CI fails on a planted secret, a CRITICAL/HIGH CVE, a Dockerfile lint error and a coverage drop (each proven once, then reverted)
 - [ ] The Auth0 dev tenant is fully defined in Terraform; `plan` shows no drift
@@ -151,8 +151,8 @@ flowchart LR
   - Issues, Discussions and Wiki off; interaction limits set to collaborators only
   - Documented in `docs/runbooks/github-repo-settings.md`
 - **Acceptance criteria:**
-  - [ ] A direct push to `main` is rejected
-  - [ ] A PR with a failing check can't be merged
+  - [x] A direct push to `main` is rejected
+  - [x] A PR with a failing check can't be merged
 - **Depends on:** P1-06
 - **Runs on:** GitHub
 - **Output:** `docs/runbooks/github-repo-settings.md`

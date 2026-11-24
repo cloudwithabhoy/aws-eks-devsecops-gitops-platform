@@ -46,9 +46,11 @@ jobs:
 
       # The gitleaks hook only scans *staged* changes, which is empty in CI;
       # the gitleaks job below scans the full history instead.
+      # no-commit-to-branch would fail every push-to-main run (main is checked out);
+      # the ruleset enforces PR-only merges on the server side.
       - name: Run hooks
         env:
-          SKIP: gitleaks
+          SKIP: gitleaks,no-commit-to-branch
         run: pre-commit run --all-files --show-diff-on-failure --color=always
 
   gitleaks:
